@@ -8,7 +8,7 @@ import (
 
 var initCmd = &cobra.Command{
 	Use:   "init",
-	Short: "it",
+	Short: "init",
 	Long:  "init",
 	Run: func(d *cobra.Command, args []string) {
 		if err := container.RunContainerInitProcess(); err != nil {

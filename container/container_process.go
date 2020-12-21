@@ -15,10 +15,10 @@ var (
 	DefaultInfoLocation string = "/var/run/bucket/%s/"
 	ConfigName          string = "config.json"
 	ContainerLogFile    string = "container.log"
-	RootUrl             string = "/tmp/bucket"
-	MntUrl              string = "/tmp/bucket/mnt/%s"
-	WriteLayerUrl       string = "/var/run/bucket/writeLayer/%s"
-	ImageUrl            string = "/var/run/bucket/image"
+	RootUrl             string = "/home/kain/Documents"
+	MntUrl              string = "/home/kain/Documents/mnt/%s"
+	WriteLayerUrl       string = "/home/kain/Documents/writeLayer/%s"
+	ImageUrl            string = "/home/kain/Documents"
 )
 
 type ContainerInfo struct {
