@@ -29,6 +29,7 @@ type ContainerInfo struct {
 	CreatedTime string `json:"createTime"` //创建时间
 	Status      string `json:"status"`     //容器的状态
 	Volume      string `json:"volume"`     //容器的数据卷
+	PortMapping []string `json:"portmapping"` //端口映射
 }
 
 func NewContainerProcess(input, tty bool, containerName, volume, imageName string, envSlice []string) (*exec.Cmd, *os.File) {

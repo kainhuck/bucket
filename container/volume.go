@@ -2,6 +2,7 @@ package container
 
 import (
 	"bucket/log"
+	"bucket/utils"
 	"fmt"
 	"os"
 	"os/exec"
@@ -29,7 +30,7 @@ func NewWorkSpace(volume, imageName, containerName string) {
 func CreateReadOnlyLayer(imageName string) error {
 	unTarFolderUrl := RootUrl + "/" + imageName + "/"
 	imageUrl := ImageUrl + "/" + imageName + ".tar"
-	exist, err := PathExists(unTarFolderUrl)
+	exist, err := utils.PathExists(unTarFolderUrl)
 	if err != nil {
 		log.ConsoleLog.Info("Fail to judge whether dir %s exists. %v", unTarFolderUrl, err)
 		return err
@@ -148,15 +149,4 @@ func DeleteWriteLayer(containerName string) {
 	if err := os.RemoveAll(writeURL); err != nil {
 		log.ConsoleLog.Info("Remove writeLayer dir %s error %v", writeURL, err)
 	}
-}
-
-func PathExists(path string) (bool, error) {
-	_, err := os.Stat(path)
-	if err == nil {
-		return true, nil
-	}
-	if os.IsNotExist(err) {
-		return false, nil
-	}
-	return false, err
 }
