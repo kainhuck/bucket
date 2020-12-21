@@ -19,4 +19,5 @@ func init() {
 	rootCmd.AddCommand(stopCmd)
 	rootCmd.AddCommand(removeCmd)
 	rootCmd.AddCommand(commitCmd)
+	rootCmd.AddCommand(networkCmd)
 }
