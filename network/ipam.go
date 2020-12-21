@@ -2,12 +2,11 @@ package network
 
 import (
 	"bucket/log"
-	"bucket/utils"
-	"encoding/json"
 	"net"
 	"os"
 	"path"
 	"strings"
+	"encoding/json"
 )
 
 const ipamDefaultAllocatorPath = "/var/run/bucket/network/ipam/subnet.json"
@@ -17,34 +16,62 @@ type IPAM struct {
 	Subnets *map[string]string
 }
 
-var ipAllocator = &IPAM {
+var ipAllocator = &IPAM{
 	SubnetAllocatorPath: ipamDefaultAllocatorPath,
 }
 
-func (i *IPAM) load() error {
-	exist, err := utils.PathExists(i.SubnetAllocatorPath)
-	if err != nil{
-		return err
+func (ipam *IPAM) load() error {
+	if _, err := os.Stat(ipam.SubnetAllocatorPath); err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		} else {
+			return err
+		}
 	}
-	if !exist{
-		return nil
-	}
-
-	subnetConfigFile, err := os.Open(i.SubnetAllocatorPath)
-	if err != nil{
-		return err
-	}
+	subnetConfigFile, err := os.Open(ipam.SubnetAllocatorPath)
 	defer func() {
 		_ = subnetConfigFile.Close()
 	}()
-
+	if err != nil {
+		return err
+	}
 	subnetJson := make([]byte, 2000)
 	n, err := subnetConfigFile.Read(subnetJson)
 	if err != nil {
 		return err
 	}
 
-	err = json.Unmarshal(subnetJson[:n], i.Subnets)
+	err = json.Unmarshal(subnetJson[:n], ipam.Subnets)
+	if err != nil {
+		log.ConsoleLog.Error("Error dump allocation info, %v", err)
+		return err
+	}
+	return nil
+}
+
+func (ipam *IPAM) dump() error {
+	ipamConfigFileDir, _ := path.Split(ipam.SubnetAllocatorPath)
+	if _, err := os.Stat(ipamConfigFileDir); err != nil {
+		if os.IsNotExist(err) {
+			_ = os.MkdirAll(ipamConfigFileDir, 0644)
+		} else {
+			return err
+		}
+	}
+	subnetConfigFile, err := os.OpenFile(ipam.SubnetAllocatorPath, os.O_TRUNC | os.O_WRONLY | os.O_CREATE, 0644)
+	defer func() {
+		_ = subnetConfigFile.Close()
+	}()
+	if err != nil {
+		return err
+	}
+
+	ipamConfigJson, err := json.Marshal(ipam.Subnets)
+	if err != nil {
+		return err
+	}
+
+	_, err = subnetConfigFile.Write(ipamConfigJson)
 	if err != nil {
 		return err
 	}
@@ -52,75 +79,63 @@ func (i *IPAM) load() error {
 	return nil
 }
 
-func (i *IPAM) dump() error{
-	ipamConfigFileDir, _ := path.Split(i.SubnetAllocatorPath)
-	exist, _ := utils.PathExists(ipamConfigFileDir)
-	if !exist {
-		_ = os.MkdirAll(ipamConfigFileDir, 0644)
-	}
+func (ipam *IPAM) Allocate(subnet *net.IPNet) (ip net.IP, err error) {
+	// 存放网段中地址分配信息的数组
+	ipam.Subnets = &map[string]string{}
 
-	subnetConfigFile, err  := os.OpenFile(i.SubnetAllocatorPath, os.O_TRUNC | os.O_WRONLY | os.O_CREATE, 0644)
+	// 从文件中加载已经分配的网段信息
+	err = ipam.load()
 	if err != nil {
-		return err
+		log.ConsoleLog.Error("Error dump allocation info, %v", err)
 	}
 
-	ipamConfigJSON, err := json.Marshal(i.Subnets)
-	if err != nil {
-		return err
-	}
+	_, subnet, _ = net.ParseCIDR(subnet.String())
 
-	_, err = subnetConfigFile.Write(ipamConfigJSON)
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func (i *IPAM) Allocate(subnet *net.IPNet) (ip net.IP, err error) {
-	i.Subnets = &map[string]string{}
-	err = i.load()
-	if err != nil {
-		log.ConsoleLog.Error("error load allocation info, %v", err)
-	}
 	one, size := subnet.Mask.Size()
 
-	if _, exist := (*i.Subnets)[subnet.String()]; !exist{
-		(*i.Subnets)[subnet.String()] = strings.Repeat("0", 1 << uint8(size-one))
+	if _, exist := (*ipam.Subnets)[subnet.String()]; !exist {
+		(*ipam.Subnets)[subnet.String()] = strings.Repeat("0", 1 << uint8(size - one))
 	}
 
-	for c := range (*i.Subnets)[subnet.String()]{
-		if (*i.Subnets)[subnet.String()][c] == '0'{
-			ipalloc := []byte((*i.Subnets)[subnet.String()])
+	for c := range (*ipam.Subnets)[subnet.String()] {
+		if (*ipam.Subnets)[subnet.String()][c] == '0' {
+			ipalloc := []byte((*ipam.Subnets)[subnet.String()])
 			ipalloc[c] = '1'
-			(*i.Subnets)[subnet.String()] = string(ipalloc)
+			(*ipam.Subnets)[subnet.String()] = string(ipalloc)
 			ip = subnet.IP
-			for t := uint(4); t > 0; t --{
-				[]byte(ip)[4-t] += uint8((c >> ((t-1) * 8)))
+			for t := uint(4); t > 0; t-=1 {
+				[]byte(ip)[4-t] += uint8(c >> ((t - 1) * 8))
 			}
-			ip[3] += 1
+			ip[3]+=1
 			break
 		}
 	}
-	err = i.dump()
+
+	err = ipam.dump()
 	return
 }
 
-func (i *IPAM)Release(subnet *net.IPNet, ipaddr *net.IP) error {
-	i.Subnets = &map[string]string{}
-	err := i.load()
+func (ipam *IPAM) Release(subnet *net.IPNet, ipaddr *net.IP) error {
+	ipam.Subnets = &map[string]string{}
+
+	_, subnet, _ = net.ParseCIDR(subnet.String())
+
+	err := ipam.load()
 	if err != nil {
-		log.ConsoleLog.Error("Error load allocation info, %v", err)
+		log.ConsoleLog.Error("Error dump allocation info, %v", err)
 	}
+
 	c := 0
 	releaseIP := ipaddr.To4()
-	releaseIP[3] -= 1
-	for t := uint(4); t > 0; t -= 1{
-		c += int(releaseIP[t-1] - subnet.IP[t - 1]) << ((4-t) * 8)
+	releaseIP[3]-=1
+	for t := uint(4); t > 0; t-=1 {
+		c += int(releaseIP[t-1] - subnet.IP[t-1]) << ((4-t) * 8)
 	}
-	ipalloc := []byte((*i.Subnets)[subnet.String()])
-	ipalloc[c] = '0'
-	(*i.Subnets)[subnet.String()] = string(ipalloc)
 
-	return i.dump()
+	ipalloc := []byte((*ipam.Subnets)[subnet.String()])
+	ipalloc[c] = '0'
+	(*ipam.Subnets)[subnet.String()] = string(ipalloc)
+
+	err = ipam.dump()
+	return nil
 }

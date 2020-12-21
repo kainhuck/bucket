@@ -5,6 +5,7 @@ import (
 	"bucket/cgroups/subsystems"
 	"bucket/container"
 	"bucket/log"
+	"bucket/network"
 	"encoding/json"
 	"fmt"
 	"github.com/spf13/cobra"
@@ -24,6 +25,8 @@ var memory string
 var cpuSet string
 var cpuShare string
 var envList []string
+var net string
+var portMapping []string
 
 var runCmd = &cobra.Command{
 	Use:   "run",
@@ -49,7 +52,7 @@ var runCmd = &cobra.Command{
 			CpuSet:      cpuSet,
 		}
 
-		Run(input, tty, cmdList, resConf, name, volume, imageName, envList)
+		Run(input, tty, cmdList, resConf, name, volume, imageName, envList, net, portMapping)
 	},
 }
 
@@ -62,10 +65,13 @@ func init() {
 	runCmd.Flags().StringVarP(&memory, "memory", "m", "", "set container memory limit")
 	runCmd.Flags().StringVarP(&cpuSet, "cpuset", "x", "", "set container cpuset")
 	runCmd.Flags().StringVarP(&cpuShare, "cpushare", "y", "", "set container cpushare")
+	runCmd.Flags().StringVarP(&net, "net", "z", "", "set container network")
+	runCmd.Flags().StringSliceVarP(&portMapping, "port", "p", []string{}, "set container port")
 	runCmd.Flags().StringSliceVarP(&envList, "environment", "e", []string{}, "set container env")
 }
 
-func Run(input, tty bool, comArray []string, res *subsystems.ResourceConfig, containerName, volume, imageName string, envSlice []string) {
+func Run(input, tty bool, comArray []string, res *subsystems.ResourceConfig, containerName, volume, imageName string, envSlice []string,
+	nw string, portMapping []string) {
 	containerID := randStringBytes(10)
 	if containerName == "" {
 		containerName = containerID
@@ -92,6 +98,21 @@ func Run(input, tty bool, comArray []string, res *subsystems.ResourceConfig, con
 	defer cgroupManager.Destroy()
 	cgroupManager.Set(res)
 	cgroupManager.Apply(parent.Process.Pid)
+
+	if nw != "" {
+		// config container network
+		_ = network.Init()
+		containerInfo := &container.ContainerInfo{
+			Id:          containerID,
+			Pid:         strconv.Itoa(parent.Process.Pid),
+			Name:        containerName,
+			PortMapping: portMapping,
+		}
+		if err := network.Connect(nw, containerInfo); err != nil {
+			log.ConsoleLog.Error("Error Connect Network %v", err)
+			return
+		}
+	}
 
 	sendInitCommand(comArray, writePipe)
 

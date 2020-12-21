@@ -7,6 +7,7 @@ import (
 	"net"
 	"os/exec"
 	"strings"
+	"time"
 )
 
 type BridgeNetworkDriver struct {
@@ -16,16 +17,15 @@ func (d *BridgeNetworkDriver) Name() string {
 	return "bridge"
 }
 
-func (b *BridgeNetworkDriver) Create(subnet string, name string) (*Network, error){
+func (d *BridgeNetworkDriver) Create(subnet string, name string) (*Network, error) {
 	ip, ipRange, _ := net.ParseCIDR(subnet)
 	ipRange.IP = ip
-
-	n := &Network{
+	n := &Network {
 		Name: name,
-		IPRange: ipRange,
+		IpRange: ipRange,
+		Driver: d.Name(),
 	}
-	err := b.initBridge(n)
-
+	err := d.initBridge(n)
 	if err != nil {
 		log.ConsoleLog.Error("error init bridge: %v", err)
 	}
@@ -33,17 +33,16 @@ func (b *BridgeNetworkDriver) Create(subnet string, name string) (*Network, erro
 	return n, err
 }
 
-func (b *BridgeNetworkDriver) Delete(network Network) error{
+func (d *BridgeNetworkDriver) Delete(network Network) error {
 	bridgeName := network.Name
 	br, err := netlink.LinkByName(bridgeName)
 	if err != nil {
 		return err
 	}
-
 	return netlink.LinkDel(br)
 }
 
-func (b *BridgeNetworkDriver) Connect(network *Network, endpoint *Endpoint) error{
+func (d *BridgeNetworkDriver) Connect(network *Network, endpoint *Endpoint) error {
 	bridgeName := network.Name
 	br, err := netlink.LinkByName(bridgeName)
 	if err != nil {
@@ -56,29 +55,36 @@ func (b *BridgeNetworkDriver) Connect(network *Network, endpoint *Endpoint) erro
 
 	endpoint.Device = netlink.Veth{
 		LinkAttrs: la,
-		PeerName: "cif-" + endpoint.ID[:5],
+		PeerName:  "cif-" + endpoint.ID[:5],
 	}
 
-	if err = netlink.LinkAdd(&endpoint.Device); err != nil{
+	if err = netlink.LinkAdd(&endpoint.Device); err != nil {
 		return fmt.Errorf("Error Add Endpoint Device: %v", err)
 	}
 
+	if err = netlink.LinkSetUp(&endpoint.Device); err != nil {
+		return fmt.Errorf("Error Add Endpoint Device: %v", err)
+	}
 	return nil
 }
 
-func (b *BridgeNetworkDriver) Disconnect(network Network, endpoint *Endpoint) error{
+func (d *BridgeNetworkDriver) Disconnect(network Network, endpoint *Endpoint) error {
 	return nil
 }
 
-func (b *BridgeNetworkDriver) initBridge(n *Network) error{
+
+func (d *BridgeNetworkDriver) initBridge(n *Network) error {
+	// try to get bridge by name, if it already exists then just exit
 	bridgeName := n.Name
-	if err := createBridgeInterface(bridgeName); err != nil{
-		return fmt.Errorf("Error add bridge: %s, Error: %v", bridgeName, err)
+	if err := createBridgeInterface(bridgeName); err != nil {
+		return fmt.Errorf("Error add bridge： %s, Error: %v", bridgeName, err)
 	}
 
-	gatewayIP := *n.IPRange
-	gatewayIP.IP = n.IPRange.IP
-	if err := setInterfaceIP(bridgeName, gatewayIP.String()); err != nil{
+	// Set bridge IP
+	gatewayIP := *n.IpRange
+	gatewayIP.IP = n.IpRange.IP
+
+	if err := setInterfaceIP(bridgeName, gatewayIP.String()); err != nil {
 		return fmt.Errorf("Error assigning address: %s on bridge: %s with an error of: %v", gatewayIP, bridgeName, err)
 	}
 
@@ -86,42 +92,49 @@ func (b *BridgeNetworkDriver) initBridge(n *Network) error{
 		return fmt.Errorf("Error set bridge up: %s, Error: %v", bridgeName, err)
 	}
 
-	if err := setupIPTables(bridgeName, n.IPRange); err != nil {
-		return fmt.Errorf("Error setting ipatbles for %s: %v", bridgeName, err)
+	// Setup iptables
+	if err := setupIPTables(bridgeName, n.IpRange); err != nil {
+		return fmt.Errorf("Error setting iptables for %s: %v", bridgeName, err)
 	}
 
 	return nil
 }
 
-func createBridgeInterface(bridgeName string) error{
+// deleteBridge deletes the bridge
+func (d *BridgeNetworkDriver) deleteBridge(n *Network) error {
+	bridgeName := n.Name
+
+	// get the link
+	l, err := netlink.LinkByName(bridgeName)
+	if err != nil {
+		return fmt.Errorf("Getting link with name %s failed: %v", bridgeName, err)
+	}
+
+	// delete the link
+	if err := netlink.LinkDel(l); err != nil {
+		return fmt.Errorf("Failed to remove bridge interface %s delete: %v", bridgeName, err)
+	}
+
+	return nil
+}
+
+func createBridgeInterface(bridgeName string) error {
 	_, err := net.InterfaceByName(bridgeName)
 	if err == nil || !strings.Contains(err.Error(), "no such network interface") {
 		return err
 	}
 
+	// create *netlink.Bridge object
 	la := netlink.NewLinkAttrs()
 	la.Name = bridgeName
 
-	br := &netlink.Bridge{la, nil, nil, nil}
-	if err := netlink.LinkAdd(br); err != nil{
-		return fmt.Errorf("Bridge creation faild for bridge %s: %v", bridgeName, err)
+	br := &netlink.Bridge{
+		LinkAttrs: la,
 	}
-
+	if err := netlink.LinkAdd(br); err != nil {
+		return fmt.Errorf("Bridge creation failed for bridge %s: %v", bridgeName, err)
+	}
 	return nil
-}
-
-func setInterfaceIP(name string, rawIP string) error {
-	iface, err := netlink.LinkByName(name)
-	if err != nil {
-		return fmt.Errorf("error get interface: %v", err)
-	}
-	ipNet, err := netlink.ParseIPNet(rawIP)
-	if err != nil{
-		return err
-	}
-
-	addr := &netlink.Addr{ipNet, "", 0, 0, nil, nil, 0 ,0}
-	return netlink.AddrAdd(iface, addr)
 }
 
 func setInterfaceUP(interfaceName string) error {
@@ -134,6 +147,33 @@ func setInterfaceUP(interfaceName string) error {
 		return fmt.Errorf("Error enabling interface for %s: %v", interfaceName, err)
 	}
 	return nil
+}
+
+
+// Set the IP addr of a netlink interface
+func setInterfaceIP(name string, rawIP string) error {
+	retries := 2
+	var iface netlink.Link
+	var err error
+	for i := 0; i < retries; i++ {
+		iface, err = netlink.LinkByName(name)
+		if err == nil {
+			break
+		}
+		log.ConsoleLog.Debug("error retrieving new bridge netlink link [ %s ]... retrying", name)
+		time.Sleep(2 * time.Second)
+	}
+	if err != nil {
+		return fmt.Errorf("Abandoning retrieving the new bridge link from netlink, Run [ ip link ] to troubleshoot the error: %v", err)
+	}
+	ipNet, err := netlink.ParseIPNet(rawIP)
+	if err != nil {
+		return err
+	}
+	addr := &netlink.Addr{
+		IPNet: ipNet,
+	}
+	return netlink.AddrAdd(iface, addr)
 }
 
 func setupIPTables(bridgeName string, subnet *net.IPNet) error {

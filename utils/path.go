@@ -12,4 +12,3 @@ func PathExists(path string) (bool, error) {
 	}
 	return false, err
 }
-
