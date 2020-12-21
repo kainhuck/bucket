@@ -20,7 +20,7 @@ __attribute__((constructor)) void enter_namespace(void) {
 	char *bucket_cmd;
 	bucket_cmd = getenv("bucket_cmd");
 	if (bucket_cmd) {
-		//fprintf(stdout, "got bucket_cmd=%s\n", mydocker_cmd);
+		//fprintf(stdout, "got bucket_cmd=%s\n", bucket_cmd);
 	} else {
 		//fprintf(stdout, "missing bucket_cmd env skip nsenter");
 		return;

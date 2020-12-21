@@ -93,8 +93,8 @@ func Run(input, tty bool, comArray []string, res *subsystems.ResourceConfig, con
 		return
 	}
 
-	// use mydocker-cgroup as cgroup name
-	cgroupManager := cgroups.NewCgroupManager("mydocker-cgroup")
+	// use bucket-cgroup as cgroup name
+	cgroupManager := cgroups.NewCgroupManager("bucket-cgroup")
 	defer cgroupManager.Destroy()
 	cgroupManager.Set(res)
 	cgroupManager.Apply(parent.Process.Pid)
